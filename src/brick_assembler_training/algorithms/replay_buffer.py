@@ -5,7 +5,12 @@ from shape_extensions import Int, IntTuple, IntVar
 from torch import Tensor
 
 
-class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple]:
+class ReplayBuffer[
+    Cap: IntVar,
+    StateShape: IntTuple,
+    ActionMasksShape: IntTuple,
+    ActionShape: IntTuple,
+]:
     """
     Stores transitions and generates mini batches.
     """
@@ -15,13 +20,17 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
         state_shape: StateShape,
         action_masks_shape: ActionMasksShape,
         capacity: Int[Cap],
-        action_type: type[float | int],
+        action_type: torch.dtype,
+        action_shape: ActionShape,
     ) -> None:
+        if capacity <= 0:
+            raise ValueError("Buffer capacity must be positive")
         k = torch.float
         batch_state_shape = (capacity, *state_shape)
         batch_action_masks_shape = (capacity, *action_masks_shape)
         self.capacity = capacity
         self.next = 0
+        self.size = 0
         d = torch.device("cpu")
         self.states: Tensor[[Cap, *StateShape]] = torch.zeros(
             batch_state_shape, dtype=k, device=d, requires_grad=False
@@ -30,7 +39,7 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
             batch_state_shape, dtype=k, device=d, requires_grad=False
         )
         self.actions = torch.zeros(
-            (capacity,), dtype=action_type, device=d, requires_grad=False
+            (capacity, *action_shape), dtype=action_type, device=d, requires_grad=False
         )
         self.rewards = torch.zeros((capacity,), dtype=k, device=d, requires_grad=False)
         # Technically this is the "terminated" flag
@@ -47,7 +56,7 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
         self,
         states: Tensor[[B, *StateShape]],
         next_states: Tensor[[B, *StateShape]],
-        actions: Tensor[[B]],
+        actions: Tensor[[B, *ActionShape]],
         rewards: list[float],
         dones: list[bool],
         masks: Tensor | None,
@@ -58,6 +67,8 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
         more data than steps aren't inserted.
         """
         batch_size = len(dones)
+        if batch_size > self.capacity:
+            raise ValueError("A transition batch cannot exceed buffer capacity")
         d = torch.device("cpu")
         with torch.no_grad():
             indices = torch.arange(
@@ -78,15 +89,18 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
             if next_masks is not None:
                 self.next_masks.index_copy_(0, indices, next_masks.to(torch.int))
         self.next = (self.next + batch_size) % self.capacity
-        if self.next == 0:
-            self.filled = True
+        self.size = min(self.capacity, self.size + batch_size)
+        self.filled = self.size == self.capacity
+
+    def __len__(self) -> int:
+        return self.size
 
     def sample[B: IntVar](
         self, batch_size: Int[B]
     ) -> tuple[
         Tensor[[B, *StateShape]],  # States
         Tensor[[B, *StateShape]],  # Next States
-        Tensor[[B]],  # Actions
+        Tensor[[B, *ActionShape]],  # Actions
         Tensor[[B]],  # Rewards
         Tensor[[B]],  # Dones
         Tensor[[B, *ActionMasksShape]],  # Action Masks
@@ -95,9 +109,11 @@ class ReplayBuffer[Cap: IntVar, StateShape: IntTuple, ActionMasksShape: IntTuple
         """
         Generates a minibatch of experience.
         """
+        if self.size == 0:
+            raise ValueError("Cannot sample an empty replay buffer")
         with torch.no_grad():
             indices = torch.randint(
-                self.capacity,
+                self.size,
                 (batch_size,),
                 dtype=torch.int,
             )

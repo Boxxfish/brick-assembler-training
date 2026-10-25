@@ -1,3 +1,6 @@
+# Temp files
+runs/
+
 # Python-generated files
 __pycache__/
 *.py[oc]

@@ -16,17 +16,28 @@ def parse_args[T: BaseModel](cfg_t: type[T]) -> T:
     parser = ArgumentParser()
     for k, v in cfg_t.model_fields.items():
         flag_name = f"--{k.replace('_', '-')}"
+        help_text = v.description
         if v.annotation is bool:
-            parser.add_argument(flag_name, default=v.default, action="store_true")
+            parser.add_argument(
+                flag_name, default=v.default, action="store_true", help=help_text
+            )
         elif get_origin(v.annotation) == Literal:
             choices = list(get_args(v.annotation))
             parser.add_argument(
-                flag_name, default=v.default, choices=choices, type=type(choices[0])
+                flag_name,
+                default=v.default,
+                choices=choices,
+                type=type(choices[0]),
+                help=help_text,
             )
         else:
             assert v.annotation is not None
-            # pyrefly: ignore[bad-argument-type]
-            parser.add_argument(flag_name, default=v.default, type=v.annotation)
+            parser.add_argument(
+                flag_name,
+                default=v.default,
+                type=v.annotation,  # pyrefly: ignore[bad-argument-type]
+                help=help_text,
+            )
     args = parser.parse_args()
     cfg = cfg_t(**args.__dict__)
     return cfg

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import torch
-from shape_extensions import IntTuple
 from torch import nn
 
 from ..utils import polyak_avg
 from .replay_buffer import ReplayBuffer
 
-INF = 10e8
 
-
-def train_td3[StateShape: IntTuple](
+def train_td3(
     q_net_1: nn.Module,
     q_net_1_target: nn.Module,
     q_1_opt: torch.optim.Optimizer,
@@ -63,31 +60,27 @@ def train_td3[StateShape: IntTuple](
         # Perform gradient descent on Q networks, reducing prediction error
         q_1_opt.zero_grad()
         q_2_opt.zero_grad()
-        eps = (
-            torch.distributions.Normal(0, noise_scale)
-            .sample(torch.Size([train_batch_size, act_low.shape[0]]))
-            .to(device)
-        )
-        target_acts = torch.clip(
-            p_net_target(states).detach() + torch.clip(eps, -noise_clip, noise_clip),
-            act_low,
-            act_high,
-        )
-        q_targets = torch.min(
-            q_net_1_target(states, target_acts).squeeze(),
-            q_net_2_target(states, target_acts).squeeze(),
-        ).detach()
-        targets = rewards + discount * (1.0 - dones) * q_targets
+        with torch.no_grad():
+            target_acts = p_net_target(states)
+            eps = (torch.randn_like(target_acts) * noise_scale).clamp(
+                -noise_clip, noise_clip
+            )
+            target_acts = torch.clip(target_acts + eps, act_low, act_high)
+            q_targets = torch.min(
+                q_net_1_target(states, target_acts).squeeze(-1),
+                q_net_2_target(states, target_acts).squeeze(-1),
+            )
+            targets = rewards + discount * (1.0 - dones) * q_targets
         q_1_loss = torch.mean(
-            (q_net_1(prev_states, actions).squeeze() - targets) ** 2, 0
-        ).squeeze(0)
+            (q_net_1(prev_states, actions).squeeze(-1) - targets) ** 2
+        )
         q_1_loss.backward()
         q_1_opt.step()
         total_q_loss += q_1_loss.item()
 
         q_2_loss = torch.mean(
-            (q_net_2(prev_states, actions).squeeze() - targets) ** 2, 0
-        ).squeeze(0)
+            (q_net_2(prev_states, actions).squeeze(-1) - targets) ** 2
+        )
         q_2_loss.backward()
         q_2_opt.step()
         total_q_loss += q_2_loss.item()
@@ -95,17 +88,15 @@ def train_td3[StateShape: IntTuple](
         if (step + 1) % update_policy_every == 0:
             # Perform gradient ascent on policy network, increasing action return
             p_opt.zero_grad()
-            p_loss = -torch.mean(q_net_1(prev_states, p_net(prev_states)), 0).squeeze(0)
+            p_loss = -q_net_1(prev_states, p_net(prev_states)).mean()
             p_loss.backward()
             p_opt.step()
             total_p_loss += p_loss.item()
 
-            # Update P network
+            # Update all targets at the same delayed cadence as the policy.
             polyak_avg(p_net, p_net_target, polyak)
-
-        # Update Q networks
-        polyak_avg(q_net_1, q_net_1_target, polyak)
-        polyak_avg(q_net_2, q_net_2_target, polyak)
+            polyak_avg(q_net_1, q_net_1_target, polyak)
+            polyak_avg(q_net_2, q_net_2_target, polyak)
 
     if device.type != "cpu":
         q_net_1.cpu()
