@@ -36,12 +36,8 @@ def train_td3(
     q_net_1.train()
     q_net_2.train()
     p_net.train()
-    if device.type != "cpu":
-        q_net_1.to(device)
-        q_net_2.to(device)
-        p_net.to(device)
-        act_low = act_low.to(device)
-        act_high = act_high.to(device)
+    act_low = act_low.to(device)
+    act_high = act_high.to(device)
 
     total_q_loss = 0.0
     total_p_loss = 0.0
@@ -98,10 +94,6 @@ def train_td3(
             polyak_avg(q_net_1, q_net_1_target, polyak)
             polyak_avg(q_net_2, q_net_2_target, polyak)
 
-    if device.type != "cpu":
-        q_net_1.cpu()
-        q_net_2.cpu()
-        p_net.cpu()
     q_net_1.eval()
     q_net_2.eval()
     p_net.eval()

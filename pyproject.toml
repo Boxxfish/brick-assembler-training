@@ -1,7 +1,7 @@
 [project]
 name = "brick-assembler-training"
 version = "0.1.0"
-description = "Add your description here"
+description = "Training code for the brick assembler project"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,3 +18,7 @@ dev = [
     "pyrefly-torch-stubs>=1.4.0",
     "ruff>=0.17.2",
 ]
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14"]
+build-backend = "uv_build"

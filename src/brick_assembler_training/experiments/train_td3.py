@@ -8,10 +8,11 @@ import random
 import gymnasium as gym
 import numpy as np
 import torch
-import wandb
 from pydantic import BaseModel, Field
 from safetensors.torch import save_model
 from tqdm import tqdm
+
+import wandb
 
 from ..algorithms.replay_buffer import ReplayBuffer
 from ..algorithms.td3 import train_td3
@@ -23,11 +24,11 @@ class Args(BaseModel):
     num_envs: int = Field(32, description="Number of parallel Pendulum environments")
     train_steps: int = Field(4, description="Vector environment steps per iteration")
     iterations: int = Field(100_000, description="Collection/training iterations")
-    train_iters: int = Field(1, description="Gradient updates per iteration")
+    train_iters: int = Field(2, description="Gradient updates per iteration")
     train_batch_size: int = Field(256, description="Training batch size")
     grad_steps: int = Field(
         1,
-        description="Number of training iterations to perform before taking a gradient step. train_iters must be > 1.",
+        description="Number of training iterations to perform before taking a gradient step. train_iters must be divisible by this.",
     )
     discount: float = Field(0.99, ge=0, le=1, description="Discount factor")
     q_lr: float = Field(0.001, description="Learning rate of the value network")
@@ -41,7 +42,8 @@ class Args(BaseModel):
     noise_clip: float = Field(0.5, ge=0, description="Target smoothing noise limit")
     polyak: float = Field(0.005, le=1, description="Source weight in target updates")
     update_policy_every: int = Field(
-        2, description="Critic updates per policy/target update"
+        2,
+        description="Critic updates per policy/target update. train_iters must be divisible by this.",
     )
     warmup_steps: int = Field(
         500,
@@ -130,6 +132,7 @@ def main() -> None:
     test_env.reset()
     p_net.eval()
 
+    # Training loop
     for iteration in tqdm(range(args.iterations)):
         # Collect samples
         with torch.inference_mode():
